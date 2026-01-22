@@ -132,13 +132,17 @@ The observed first-player advantage of approximately **2.1 percentage points** i
 
 The Deep Q-Network (DQN) algorithm, introduced by Mnih et al. (2015), combines Q-learning with deep neural networks to approximate the optimal action-value function:
 
-$$Q^*(s, a) = \mathbb{E}\left[r + \gamma \max_{a'} Q^*(s', a') \mid s, a\right]$$
+```
+Q*(s, a) = E[r + gamma * max_a' Q*(s', a') | s, a]
+```
 
 The network learns to predict Q-values through temporal difference updates:
 
-$$\mathcal{L}(\theta) = \mathbb{E}_{(s,a,r,s') \sim \mathcal{D}}\left[\left(r + \gamma \max_{a'} Q(s', a'; \theta^-) - Q(s, a; \theta)\right)^2\right]$$
+```
+L(theta) = E[(r + gamma * max_a' Q(s', a'; theta-) - Q(s, a; theta))^2]
+```
 
-where θ⁻ denotes the parameters of a slowly-updated target network, and 𝒟 is an experience replay buffer.
+where theta- denotes the parameters of a slowly-updated target network, and D is an experience replay buffer.
 
 ### 3.2 State Representation
 
