@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uno Game - RL Agent</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+
+<body>
+    <!-- Main Menu -->
+    <div id="menu-screen" class="screen active">
+        <div class="menu-container">
+            <h1 class="menu-title">🃏 UNO Game 🃏</h1>
+            <div class="menu-divider"></div>
+            <button class="menu-button primary" onclick="startGame('rl')">
+                1. Play vs RL Agent
+            </button>
+            <button class="menu-button" onclick="showModelPicker()">
+                2. Play vs LLM Opponent
+            </button>
+            <button class="menu-button" onclick="startGame('human')">
+                3. Human vs Human
+            </button>
+            <div class="menu-divider"></div>
+            <button class="menu-button spectator" onclick="toggleSpectatorMenu()">
+                👁️ Watch: RL vs LLM
+            </button>
+            <div id="spectator-submenu" class="submenu hidden">
+                <button class="submenu-button" onclick="startGame('spectator', 'gemini_flash')">
+                    → vs Gemini 3 Flash
+                </button>
+                <button class="submenu-button" onclick="startGame('spectator', 'gpt_5')">
+                    → vs GPT 5.2
+                </button>
+                <button class="submenu-button" onclick="startGame('spectator', 'opus')">
+                    → vs Opus 4.5
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Model Picker -->
+    <div id="model-screen" class="screen">
+        <div class="menu-container">
+            <h2 class="menu-title">Select LLM Model</h2>
+            <div class="menu-divider"></div>
+            <button class="menu-button primary" onclick="startGame('llm', 'gemini_flash')">
+                1. Gemini 3 Flash
+            </button>
+            <button class="menu-button" onclick="startGame('llm', 'gpt_5')">
+                2. GPT 5.2
+            </button>
+            <button class="menu-button" onclick="startGame('llm', 'opus')">
+                3. Opus 4.5
+            </button>
+            <div class="menu-divider"></div>
+            <button class="menu-button warning" onclick="showMenu()">
+                ← Back
+            </button>
+        </div>
+    </div>
+
+
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
+        <header class="game-header">
+            <h1>Uno vs RL Agent</h1>
+            <div class="header-actions">
+                <button class="rl-info-toggle" onclick="toggleRLPanel()">
+                    🧠 RL Logic
+                </button>
+                <button class="quit-button" onclick="quitGame()">Quit (Q)</button>
+            </div>
+        </header>
+
+        <div class="game-layout">
+            <!-- Opponent Area -->
+            <div class="opponent-area">
+                <div class="opponent-panel">
+                    <div class="opponent-name" id="opponent-name">Opponent</div>
+                    <div class="opponent-cards" id="opponent-cards">Cards: 7</div>
+                    <div class="turn-indicator" id="opponent-turn-indicator"></div>
+                </div>
+            </div>
+
+            <!-- Main Game Area -->
+            <div class="main-area">
+                <!-- Log Panel -->
+                <div class="log-panel">
+                    <h3>Game Log</h3>
+                    <div class="log-content" id="game-log"></div>
+                </div>
+
+                <!-- Center - Discard Pile -->
+                <div class="center-panel">
+                    <div class="discard-pile" id="discard-pile">
+                        <div class="card-display" id="top-card">
+                            <span class="card-value">?</span>
+                        </div>
+                        <div class="active-color" id="active-color">Active: -</div>
+                    </div>
+                    <div class="status-panel" id="status-panel">
+                        Waiting...
+                    </div>
+                </div>
+
+                <!-- RL Logic Panel (replaces help panel) -->
+                <div class="rl-panel" id="rl-panel">
+                    <h3>🧠 RL Agent Logic</h3>
+
+                    <div class="rl-theory-section">
+                        <h4>DQN Algorithm</h4>
+                        <div class="formula-box">
+                            <div class="formula">Q(s,a) ← Q(s,a) + α[r + γ max Q(s',a') - Q(s,a)]</div>
+                            <div class="formula-desc">Temporal Difference Learning</div>
+                        </div>
+                    </div>
+
+                    <div class="rl-decision-section" id="rl-decision-section">
+                        <h4>Last Decision</h4>
+                        <div id="rl-decision-content" class="rl-decision-content">
+                            <p class="waiting-text">Waiting for RL agent's turn...</p>
+                        </div>
+                    </div>
+
+                    <div class="rl-architecture">
+                        <h4>Network Architecture</h4>
+                        <div class="arch-diagram">
+                            <span class="arch-layer">State (420)</span>
+                            <span class="arch-arrow">→</span>
+                            <span class="arch-layer">Dense (512)</span>
+                            <span class="arch-arrow">→</span>
+                            <span class="arch-layer">Dense (512)</span>
+                            <span class="arch-arrow">→</span>
+                            <span class="arch-layer">Q-values (61)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Hand Area -->
+            <div class="hand-area">
+                <h3>Your Hand</h3>
+                <div class="hand-container" id="player-hand"></div>
+                <button class="draw-button" id="draw-button" onclick="drawCard()">
+                    [D] Draw Card
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Color Picker Modal -->
+    <div id="color-modal" class="modal">
+        <div class="modal-content">
+            <h3>Choose Wild Color</h3>
+            <div class="color-buttons">
+                <button class="color-btn red" onclick="selectColor('red')">Red</button>
+                <button class="color-btn yellow" onclick="selectColor('yellow')">Yellow</button>
+                <button class="color-btn green" onclick="selectColor('green')">Green</button>
+                <button class="color-btn blue" onclick="selectColor('blue')">Blue</button>
+            </div>
+            <button class="cancel-btn" onclick="cancelColorPicker()">Cancel</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+
+</html>
