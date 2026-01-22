@@ -1,0 +1,499 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+
+\geometry{margin=1in}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,
+    urlcolor=cyan,
+    citecolor=blue
+}
+
+% Title
+\title{\textbf{Training a Deep Q-Network to Master Uno: A Comprehensive Study in Reinforcement Learning for Imperfect Information Games}}
+\author{
+    An Academic Exploration of Deep Reinforcement Learning,\\
+    Game Theory, and LLM-Based Opponents
+}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This paper presents a comprehensive investigation into the application of Deep Q-Networks (DQN) for learning optimal play strategies in the classic card game Uno---a game characterized by imperfect information, stochastic elements, and dynamic action spaces. We develop a complete reinforcement learning pipeline encompassing state encoding, neural network architecture design, tournament-based training, and extensive empirical evaluation. Through 100,000 simulated games, we establish baseline game statistics that inform our training methodology. Our trained DQN agent achieves remarkable performance, demonstrating an \textbf{80\% win rate against state-of-the-art Large Language Models} including Google's Gemini 3 Flash and OpenAI's GPT 5.2. However, we observe a striking reversal against Anthropic's Opus 4.5, which defeats our agent in \textbf{80\% of matches}---a finding that illuminates the emerging importance of agentic reasoning capabilities in game-playing AI. This work contributes both a practical RL system and insights into the comparative strengths of learned policies versus frontier language models.
+\end{abstract}
+
+\section{Introduction and Motivation}
+
+\subsection{The Challenge of Imperfect Information Games}
+
+Card games have served as canonical benchmarks for artificial intelligence research since the field's inception. Unlike perfect information games such as Chess or Go, where both players observe the complete game state, Uno introduces fundamental challenges that more closely mirror real-world decision-making scenarios:
+
+\begin{enumerate}
+    \item \textbf{Imperfect Information}: Players cannot observe opponents' hands, requiring probabilistic reasoning about hidden state
+    \item \textbf{Stochastic Transitions}: The deck shuffle introduces irreducible randomness into state transitions
+    \item \textbf{Variable Action Spaces}: Legal moves depend dynamically on the current discard pile and hand composition
+    \item \textbf{Delayed Rewards}: The outcome of individual card plays may not manifest until many turns later
+\end{enumerate}
+
+These properties make Uno an ideal testbed for developing RL agents that must learn to act under uncertainty---a capability essential for real-world applications ranging from autonomous driving to financial trading.
+
+\subsection{Research Objectives}
+
+This project pursues four interconnected objectives:
+
+\begin{enumerate}
+    \item \textbf{Statistical Characterization}: Establish baseline game statistics through large-scale simulation to inform training design
+    \item \textbf{Algorithm Development}: Implement and train a DQN agent using tournament-based experience collection
+    \item \textbf{Comparative Evaluation}: Benchmark our learned agent against both random baselines and frontier LLMs
+    \item \textbf{System Deployment}: Deliver a production-quality web interface for interactive play and demonstration
+\end{enumerate}
+
+\subsection{Contributions}
+
+Our primary contributions include:
+\begin{itemize}
+    \item A novel 420-dimensional state encoding capturing hand composition, opponent modeling, and game context
+    \item Tournament-based training methodology with 100,000+ games per training session
+    \item Comprehensive empirical analysis revealing differential LLM capabilities in game-playing tasks
+    \item Open-source implementation with web-based deployment for reproducibility
+\end{itemize}
+
+\section{Game Statistics from Large-Scale Simulations}
+
+\subsection{Experimental Setup}
+
+Prior to training, we conducted extensive simulations to characterize the statistical properties of Uno gameplay. Understanding these distributions is critical for:
+\begin{itemize}
+    \item Setting appropriate discount factors ($\gamma$) based on typical episode lengths
+    \item Designing reward shaping strategies
+    \item Validating our game engine against known properties
+    \item Establishing random-play baselines for evaluation
+\end{itemize}
+
+We simulated \textbf{100,000 games} using uniformly random action selection from legal moves. Each simulation recorded:
+\begin{itemize}
+    \item Total turns until game termination
+    \item Starting player and winner identity
+    \item Per-player statistics (cards played, cards drawn)
+\end{itemize}
+
+\subsection{Game Length Distribution}
+
+The distribution of game lengths exhibits characteristic properties of competitive card games.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{turns_distribution.png}
+    \caption{Distribution of turns per game from 100,000 simulated Uno games. The pronounced right skewness reflects the occasional prolonged games where neither player can finish their hand.}
+    \label{fig:turns_dist}
+\end{figure}
+
+Our analysis reveals the following summary statistics:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Statistic} & \textbf{Value} & \textbf{Interpretation} \\
+        \midrule
+        Mean & 46.5 turns & Average game length under random play \\
+        Median & 37.0 turns & Typical game length (50th percentile) \\
+        Mode & 13 turns & Most frequent game length \\
+        Standard Deviation & 33.8 turns & High variance in game duration \\
+        Minimum & 7 turns & Fastest possible game \\
+        Maximum & 418 turns & Extreme outlier due to unlucky draws \\
+        \bottomrule
+    \end{tabular}
+    \caption{Summary statistics for game length from 100,000 simulations.}
+    \label{tab:game_stats}
+\end{table}
+
+The significant disparity between mode (13 turns) and mean (46.5 turns) indicates substantial \textbf{right skewness}---a small fraction of games extend dramatically beyond typical lengths due to unfortunate card distributions and draw pile cycling.
+
+\subsection{Percentile Analysis}
+
+To better understand the distribution tails, we computed game length percentiles:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Percentile} & \textbf{Turns} & \textbf{Cumulative Probability} \\
+        \midrule
+        25th & 23 & 25\% of games complete by this point \\
+        50th (Median) & 37 & Half of all games complete \\
+        75th & 60 & Three-quarters of games complete \\
+        90th & 90 & Only 10\% of games exceed this \\
+        95th & 113 & 5\% of games are notably long \\
+        99th & 167 & Extreme games in the 1\% tail \\
+        \bottomrule
+    \end{tabular}
+    \caption{Game length percentiles from 100,000 simulations.}
+    \label{tab:percentiles}
+\end{table}
+
+These percentiles directly informed our choice of discount factor $\gamma = 0.95$, which appropriately weights future rewards across typical game horizons.
+
+\subsection{First Player Advantage Analysis}
+
+A fundamental question in game theory concerns whether moving first confers systematic advantage.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Starting Position} & \textbf{Games Won} & \textbf{Win Rate} \\
+        \midrule
+        First Player & 51,068 & \textbf{51.07\%} \\
+        Second Player & 48,932 & 48.93\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{First player advantage analysis.}
+    \label{tab:first_player}
+\end{table}
+
+The observed first-player advantage of approximately \textbf{2.1 percentage points} is statistically significant ($p < 0.001$, binomial test) but modest in magnitude. This suggests that while going first provides a measurable edge, skilled play can readily overcome this disadvantage---an encouraging finding for our RL training objective.
+
+\section{Deep Q-Network Architecture}
+
+\subsection{Theoretical Foundation}
+
+The Deep Q-Network (DQN) algorithm, introduced by Mnih et al. (2015), combines Q-learning with deep neural networks to approximate the optimal action-value function:
+
+\begin{equation}
+    Q^*(s, a) = \mathbb{E}\left[r + \gamma \max_{a'} Q^*(s', a') \mid s, a\right]
+\end{equation}
+
+The network learns to predict Q-values through temporal difference updates:
+
+\begin{equation}
+    \mathcal{L}(\theta) = \mathbb{E}_{(s,a,r,s') \sim \mathcal{D}}\left[\left(r + \gamma \max_{a'} Q(s', a'; \theta^-) - Q(s, a; \theta)\right)^2\right]
+\end{equation}
+
+where $\theta^-$ denotes the parameters of a slowly-updated target network, and $\mathcal{D}$ is an experience replay buffer.
+
+\subsection{State Representation}
+
+We encode the game state as a \textbf{420-dimensional feature vector} structured as 7 planes of 60 features each ($4 \text{ colors} \times 15 \text{ card types}$):
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Planes} & \textbf{Features} & \textbf{Description} \\
+        \midrule
+        0-2 & 180 & Own hand card count buckets (0, 1, 2+ copies) \\
+        3-5 & 180 & Estimated opponent card counts (0, 1, 2+) \\
+        6 & 60 & Current discard pile top card (one-hot) \\
+        \midrule
+        \textbf{Total} & \textbf{420} & Complete state representation \\
+        \bottomrule
+    \end{tabular}
+    \caption{Detailed encoding scheme for the 420-dimensional state vector.}
+    \label{tab:encoding}
+\end{table}
+
+This encoding achieves several design objectives:
+\begin{itemize}
+    \item \textbf{Permutation Invariance}: Hand ordering is irrelevant
+    \item \textbf{Bounded Dimensionality}: Fixed size regardless of hand size
+    \item \textbf{Opponent Modeling}: Inferred opponent holdings based on play history
+    \item \textbf{Action Relevance}: Discard pile directly determines legality
+\end{itemize}
+
+\subsection{Action Space}
+
+The action space consists of \textbf{61 discrete actions} representing all possible moves:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Action Range} & \textbf{Count} & \textbf{Description} \\
+        \midrule
+        0-39 & 40 & Number cards ($0-9 \times 4$ colors) \\
+        40-43 & 4 & Skip cards (4 colors) \\
+        44-47 & 4 & Reverse cards (4 colors) \\
+        48-51 & 4 & Draw Two cards (4 colors) \\
+        52-55 & 4 & Wild cards (declare 4 colors) \\
+        56-59 & 4 & Wild Draw Four (declare 4 colors) \\
+        60 & 1 & Draw from deck \\
+        \bottomrule
+    \end{tabular}
+    \caption{Breakdown of the 61-action space.}
+    \label{tab:actions}
+\end{table}
+
+Illegal actions are masked during action selection, ensuring the agent only considers valid moves.
+
+\subsection{Network Architecture}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{fig1_network_arch.png}
+    \caption{The Q-Network architecture. Two hidden layers with ReLU activations transform the 420-dimensional state into 61 action Q-values.}
+    \label{fig:network}
+\end{figure}
+
+The network architecture consists of:
+\begin{itemize}
+    \item \textbf{Input Layer}: 420 neurons (state encoding)
+    \item \textbf{Hidden Layer 1}: 512 neurons + ReLU + Dropout(0.1)
+    \item \textbf{Hidden Layer 2}: 512 neurons + ReLU + Dropout(0.1)
+    \item \textbf{Output Layer}: 61 neurons (Q-values per action)
+    \item \textbf{Total Parameters}: $\sim$530,000
+    \item \textbf{Optimizer}: Adam (lr=1e-4)
+\end{itemize}
+
+\section{Training Methodology}
+
+\subsection{Tournament-Based Experience Collection}
+
+Rather than training on individual game transitions, we employ a \textbf{tournament-based} approach where each training iteration consists of a complete tournament of N games. This methodology offers several advantages:
+
+\begin{enumerate}
+    \item \textbf{Diverse Experience}: Each tournament exposes the agent to varied game scenarios
+    \item \textbf{Stable Gradients}: Averaging across many games reduces gradient variance
+    \item \textbf{Natural Curriculum}: As the agent improves, opponents (self-play variants) become stronger
+    \item \textbf{Reproducibility}: Tournament seeds enable exact replication
+\end{enumerate}
+
+\subsection{Hyperparameter Configuration}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lll}
+        \toprule
+        \textbf{Hyperparameter} & \textbf{Value} & \textbf{Rationale} \\
+        \midrule
+        Learning Rate ($\alpha$) & 1e-4 & Stable learning without oscillation \\
+        Discount Factor ($\gamma$) & 0.95 & Appropriate for $\sim$40-turn games \\
+        Initial Epsilon ($\varepsilon_0$) & 0.95 & High initial exploration \\
+        Epsilon Decay ($\kappa$) & 0.995 & Gradual transition to exploitation \\
+        Minimum Epsilon ($\varepsilon_{\min}$) & 0.01 & Maintained exploration \\
+        Batch Size & 256 & Efficient GPU utilization \\
+        Replay Buffer Size & 100,000 & Sufficient experience diversity \\
+        Target Update Frequency & 100 & Stable target Q-values \\
+        Games per Iteration & 100 & Tournament size \\
+        \bottomrule
+    \end{tabular}
+    \caption{Hyperparameter configuration for DQN training.}
+    \label{tab:hyperparams}
+\end{table}
+
+\subsection{Training Dynamics}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{fig2_dqn_avg_reward_over_iters.png}
+    \caption{Training curve showing average reward over iterations. The agent exhibits rapid initial learning followed by gradual refinement and stable convergence.}
+    \label{fig:training}
+\end{figure}
+
+The training progression reveals three distinct phases:
+
+\begin{enumerate}
+    \item \textbf{Rapid Learning (Iterations 1-50)}: The agent quickly discovers basic strategies---playing matching cards and avoiding draws when possible
+    \item \textbf{Strategy Refinement (Iterations 50-200)}: More sophisticated behaviors emerge, including wild card timing and defensive play
+    \item \textbf{Convergence (Iterations 200+)}: Performance stabilizes as the policy approaches local optimality
+\end{enumerate}
+
+\section{Evaluation: RL Agent vs Large Language Models}
+
+\subsection{Experimental Design}
+
+The most compelling evaluation of our trained agent pits it against frontier Large Language Models accessed through the OpenRouter API. This comparison illuminates:
+
+\begin{itemize}
+    \item Whether learned policies can compete with general-purpose reasoning systems
+    \item Differential capabilities across LLM architectures
+    \item The importance of agentic reasoning for game-playing tasks
+\end{itemize}
+
+We evaluated against three state-of-the-art models:
+\begin{itemize}
+    \item \textbf{Google Gemini 3 Flash}: Optimized for speed and efficiency
+    \item \textbf{OpenAI GPT 5.2}: Latest in the GPT series with enhanced reasoning
+    \item \textbf{Anthropic Opus 4.5}: Known for sophisticated multi-step reasoning
+\end{itemize}
+
+\subsection{Tournament Results}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{rl_vs_llm_tournament.png}
+    \caption{Tournament results between our DQN agent and three frontier LLMs. The stark performance difference against Opus 4.5 is immediately apparent.}
+    \label{fig:tournament}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{llll}
+        \toprule
+        \textbf{Opponent} & \textbf{RL Agent Wins} & \textbf{LLM Wins} & \textbf{RL Win Rate} \\
+        \midrule
+        Gemini 3 Flash & 80 & 20 & \textbf{80\%} \\
+        GPT 5.2 & 80 & 20 & \textbf{80\%} \\
+        Opus 4.5 & 20 & 80 & 20\% \\
+        \bottomrule
+    \end{tabular}
+    \caption{Tournament results: RL agent vs frontier LLMs.}
+    \label{tab:tournament}
+\end{table}
+
+The dramatic reversal against Opus 4.5---from 80\% wins to just 20\%---represents a \textbf{4$\times$ performance differential} that demands explanation.
+
+\subsection{Qualitative Analysis of LLM Behavior}
+
+Careful observation of gameplay revealed systematic differences in LLM decision-making:
+
+\subsubsection{Gemini 3 Flash \& GPT 5.2}
+
+These models exhibited patterns consistent with \textbf{greedy, myopic play}:
+\begin{itemize}
+    \item Immediate matching without strategic consideration
+    \item Suboptimal wild card timing (playing early when holding could be advantageous)
+    \item Inconsistent color selection (seemingly random rather than strategic)
+    \item No apparent opponent modeling or hand tracking
+\end{itemize}
+
+\subsubsection{Opus 4.5}
+
+In striking contrast, Opus 4.5 demonstrated behaviors suggesting \textbf{genuine strategic reasoning}:
+\begin{itemize}
+    \item \textbf{Hand Management}: Preserving flexibility by holding wild cards
+    \item \textbf{Color Control}: Shifting to colors where it held multiple cards
+    \item \textbf{Defensive Play}: Drawing rather than playing last matching card
+    \item \textbf{Apparent Anticipation}: Actions suggesting inference about opponent hands
+\end{itemize}
+
+\subsection{Interpretation: The Agentic Reasoning Hypothesis}
+
+We hypothesize that Opus 4.5's superior performance stems from enhanced \textbf{agentic task completion} capabilities---the ability to:
+
+\begin{enumerate}
+    \item Maintain persistent goals across multiple steps
+    \item Reason about consequences of actions beyond immediate outcomes
+    \item Model other agents and their likely responses
+    \item Adapt strategy based on game state evolution
+\end{enumerate}
+
+This capability represents a qualitative advance beyond pattern matching or single-turn reasoning. Our findings suggest that frontier models are developing genuine strategic competence that pure RL agents may struggle to match.
+
+\section{Discussion and Future Directions}
+
+\subsection{Summary of Findings}
+
+This work demonstrates that:
+
+\begin{enumerate}
+    \item \textbf{DQN is Viable for Uno}: Without any human knowledge, our agent learns competitive strategies
+    \item \textbf{LLM Capabilities Vary Dramatically}: Model selection critically impacts game-playing performance
+    \item \textbf{Agentic Reasoning Matters}: Opus 4.5's success suggests strategic depth emerges from advanced reasoning
+    \item \textbf{Large-Scale Simulation Informs Design}: 100,000-game statistics guided hyperparameter selection
+\end{enumerate}
+
+\subsection{Limitations}
+
+Our study has several limitations:
+\begin{itemize}
+    \item Evaluation against LLMs is API-dependent and non-reproducible at scale
+    \item The 2-player variant excludes multi-player dynamics
+    \item Self-play training may not generalize to diverse opponent strategies
+\end{itemize}
+
+\subsection{Future Work}
+
+Several promising directions emerge:
+\begin{itemize}
+    \item \textbf{Monte Carlo Tree Search}: Combine learned value functions with explicit planning
+    \item \textbf{Population-Based Training}: Train against diverse opponent populations
+    \item \textbf{Multi-Agent RL}: Extend to 3-4 player games with complex alliance dynamics
+    \item \textbf{Core ML Deployment}: Export to Apple devices for on-device inference
+    \item \textbf{Curriculum Learning}: Progressive difficulty scheduling during training
+\end{itemize}
+
+\section{Conclusions}
+
+We have presented a complete pipeline for training, evaluating, and deploying a Deep Q-Network agent for Uno. Our systematic approach---from 100,000-game statistical analysis through tournament-based training to LLM evaluation---yields both practical artifacts and theoretical insights.
+
+The most striking finding concerns the differential performance against LLM opponents. While our agent dominates Gemini 3 Flash and GPT 5.2 with 80\% win rates, it is convincingly defeated by Opus 4.5---a result that underscores the emerging importance of agentic reasoning capabilities in AI systems. As language models continue advancing, we anticipate that such strategic competence will become increasingly common, raising the bar for learned RL policies.
+
+Our open-source implementation provides a foundation for further research into imperfect information games, RL training methodologies, and the intersection of learned policies with language model reasoning.
+
+\section*{References}
+
+\begin{enumerate}
+    \item Mnih, V., Kavukcuoglu, K., Silver, D., et al. (2015). Human-level control through deep reinforcement learning. \textit{Nature}, 518(7540), 529-533. \url{https://doi.org/10.1038/nature14236}
+    
+    \item Van Hasselt, H., Guez, A., \& Silver, D. (2016). Deep reinforcement learning with double Q-learning. \textit{Proceedings of the AAAI Conference on Artificial Intelligence}, 30(1). \url{https://doi.org/10.1609/aaai.v30i1.10295}
+    
+    \item Zha, D., Lai, K. H., Cao, Y., et al. (2019). RLCard: A Toolkit for Reinforcement Learning in Card Games. \textit{arXiv preprint} arXiv:1910.04376. \url{https://github.com/datamllab/rlcard}
+    
+    \item Schulman, J., Wolski, F., Dhariwal, P., Radford, A., \& Klimov, O. (2017). Proximal Policy Optimization Algorithms. \textit{arXiv preprint} arXiv:1707.06347.
+    
+    \item Silver, D., Schrittwieser, J., Simonyan, K., et al. (2017). Mastering the game of Go without human knowledge. \textit{Nature}, 550(7676), 354-359.
+    
+    \item Brown, O., Jasson, D., \& Swarnakar, A. (2020). Winning Uno With Reinforcement Learning. Stanford University, AA228. \url{https://web.stanford.edu/class/aa228/reports/2020/final79.pdf}
+\end{enumerate}
+
+\appendix
+
+\section{Reproducibility}
+
+\subsection{Environment Setup}
+
+\begin{lstlisting}[language=bash]
+# Clone repository
+git clone https://github.com/mohammed840/policy-uno.git
+cd policy-uno
+
+# Install dependencies  
+pip install -e .
+
+# Set API key for LLM evaluation (optional)
+export OPENROUTER_API_KEY=your_key_here
+\end{lstlisting}
+
+\subsection{Training Commands}
+
+\begin{lstlisting}[language=bash]
+# Full training run (recommended)
+python -m rl.dqn_train --iters 1000 --games_per_iter 100
+
+# Quick test run
+python -m rl.dqn_train --iters 10 --games_per_iter 10
+
+# Run game statistics simulation
+python -m rl.game_statistics --games 100000
+\end{lstlisting}
+
+\subsection{Web Server}
+
+\begin{lstlisting}[language=bash]
+# Start the web application
+python3 web/server.py
+
+# Access at http://localhost:5000
+\end{lstlisting}
+
+\end{document}
