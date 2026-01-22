@@ -1,10 +1,6 @@
-<p align="center">
-  <img src="assets/banner.png" alt="Uno RL Agent" width="100%">
-</p>
+# Uno RL Agent
 
-# Uno CoreML TUI
-
-Train Uno RL agents (DQN + DeepSARSA), export to Core ML, and play via a polished terminal UI.
+Train Reinforcement Learning agents (DQN + DeepSARSA) to play Uno employing Deep Q-Networks with tournament-based training.
 
 ## Key Findings
 
@@ -29,14 +25,14 @@ See [docs/BLOG.md](docs/BLOG.md) for the full academic writeup with charts and a
 
 - **RL Training**: DQN and DeepSARSA agents with tournament-based training
 - **Core ML Export**: Export trained models for efficient inference on Apple devices
-- **Terminal UI**: Beautiful TUI built with Textual for playing Uno
+- **Web Interface**: Play against the RL agent or watch RL vs LLM matches
 - **Multiple Opponents**: Play vs RL agent, LLM opponent (via OpenRouter), or another human
 
 ## Installation
 
 ```bash
 # Clone and install
-cd uno-coreml-tui
+cd uno-rl-agent
 pip install -e .
 
 # For development
@@ -88,33 +84,26 @@ python -m rl.plots --run_id <run_id>
 python -m rl.export_coreml --in models/best_qnet.pt --out models/best_qnet.mlpackage
 ```
 
-### 5. Play in Terminal
+### 5. Run Web Interface
 
 ```bash
-# Start the TUI
-python -m tui.app
+# Start the web server
+python web/server.py
 
-# Or use the installed command
-uno-tui
+# Access at http://localhost:5000
 ```
 
 ## Game Modes
 
-1. **Play vs RL Agent (Core ML)**: Play against the trained RL model
-2. **Play vs LLM Opponent (OpenRouter)**: Play against an LLM (requires API key)
-3. **Human vs Human**: Local multiplayer
+1. **Play vs RL Agent**: Play against the trained RL model
+2. **Play vs LLM Opponent**: Play against an LLM (requires API key)
+3. **Spectator Mode**: Watch RL vs LLM matches
+4. **Human vs Human**: Local multiplayer
 
 For LLM opponent, set your API key:
 ```bash
 export OPENROUTER_API_KEY=your_key_here
 ```
-
-## TUI Controls
-
-- **Number keys (0-9)**: Select card by index
-- **D**: Draw a card
-- **Q**: Quit game
-- **R/G/B/Y**: Choose color when playing Wild
 
 ## Artifacts
 
@@ -192,7 +181,7 @@ epsilon <- kappa * epsilon  (decay after each iteration, kappa = 0.995)
 ## Project Structure
 
 ```
-uno-coreml-tui/
+uno-rl-agent/
 ├── uno/                 # Game engine
 │   ├── cards.py        # Card definitions
 │   ├── encoding.py     # State/action encoding
@@ -212,10 +201,9 @@ uno-coreml-tui/
 │   ├── rl_torch.py
 │   ├── llm_openrouter.py
 │   └── random_bot.py
-├── tui/                 # Terminal UI
-│   ├── app.py
-│   ├── screens.py
-│   └── widgets.py
+├── web/                 # Web interface
+│   ├── server.py       # Flask server
+│   └── static/         # Frontend assets
 ├── docs/
 ├── models/
 ├── runs/
