@@ -214,7 +214,7 @@ uno-rl-agent/
 
 This project was inspired by and builds upon the methodology presented in:
 
-> **Winning Uno With Reinforcement Learning**
+> **[Winning Uno With Reinforcement Learning](https://web.stanford.edu/class/aa228/reports/2020/final79.pdf)**
 > Olivia Brown, Diego Jasson, Ankush Swarnakar
 > Stanford University
 >
