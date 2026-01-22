@@ -210,6 +210,16 @@ uno-rl-agent/
 └── replays/
 ```
 
+## References
+
+This project was inspired by and builds upon the methodology presented in:
+
+> **Winning Uno With Reinforcement Learning**
+> Olivia Brown, Diego Jasson, Ankush Swarnakar
+> Stanford University
+>
+> *The paper explores model-free approaches using DQN and DeepSARSA to train agents that optimally play Uno. It demonstrates that while DeepSARSA converges faster and more stably, DQN consistently outperforms DeepSARSA in both direct competition and tournaments with random agents. This foundational work informed our state encoding scheme, network architecture choices, and tournament-based training methodology.*
+
 ## License
 
 MIT
