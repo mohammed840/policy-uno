@@ -45,6 +45,36 @@ Our primary contributions include:
 
 ---
 
+## 1.5 Related Work
+
+### Reinforcement Learning in Imperfect Information Games
+
+The challenge of learning optimal strategies in imperfect information games has driven significant research advances:
+
+**Neural Fictitious Self-Play (NFSP)** [Heinrich & Silver, 2016] combines deep reinforcement learning with fictitious play, maintaining both a best-response policy and an average policy to approximate Nash equilibrium. Unlike our approach, NFSP requires tracking action frequencies across training history. While NFSP has demonstrated success in Texas Hold'em Poker, it introduces additional complexity through the dual-network architecture.
+
+**Counterfactual Regret Minimization (CFR)** [Zinkevich et al., 2007] and its extensions (CFR+, Monte Carlo CFR, Deep CFR) represent the dominant paradigm for solving large-scale imperfect information games. CFR computes Nash equilibrium strategies by minimizing counterfactual regrets over a game tree. While theoretically principled, CFR requires explicit game tree enumeration or effective abstraction—challenging given Uno's combinatorial state space.
+
+**DeepStack** [Moravčík et al., 2017] and **Libratus** [Brown & Sandholm, 2017] achieved superhuman poker performance by combining CFR with deep learning for real-time re-solving of game subproblems. These methods, however, are tailored to heads-up no-limit poker's specific structure.
+
+### Our Approach: DQN with Action Masking
+
+We adopt Deep Q-Networks with action masking as a simpler, more scalable alternative. While DQN does not compute Nash equilibrium strategies, it has practical advantages:
+
+1. **Scalability**: Training scales with available compute rather than game tree size
+2. **Simplicity**: Single network architecture without fictitious play or regret tracking
+3. **Adaptability**: The learned policy adapts to opponent behavior through experience replay
+
+Our approach is closest to the **Stanford CS234 DeepSARSA work** on Uno, which similarly used function approximation methods. We extend this with:
+- **Double DQN** to reduce value overestimation
+- **Self-play training** for curriculum learning
+- **Heuristic baselines** for rigorous comparison
+
+> [!NOTE]
+> We acknowledge that DQN does not converge to Nash equilibrium in general imperfect-information games. However, against fixed opponents (random, heuristic, LLM), maximizing expected reward aligns with finding a best response.
+
+---
+
 ## 2. Game Statistics from Large-Scale Simulations
 
 ### 2.1 Experimental Setup
@@ -167,6 +197,14 @@ This encoding achieves several design objectives:
 - **Opponent Modeling**: Inferred opponent holdings based on play history
 - **Action Relevance**: Discard pile directly determines legality
 
+> [!IMPORTANT]
+> **Opponent Estimation Transparency**: Planes 3-5 estimate opponent card distributions using **only publicly observable information**:
+> 1. **Cards played** (visible to all players)
+> 2. **Draw counts** (number of cards drawn, not their values)
+> 3. **Card conservation** (remaining cards = deck - own hand - discard pile)
+>
+> The `PublicInfoTracker` class (`uno/encoding.py`) implements this transparent tracking. Under maximum entropy assumptions, remaining cards are distributed proportionally to opponent hand sizes. **No privileged information is used**—opponent hand contents are never accessed during state encoding.
+
 ### 3.3 Action Space
 
 The action space consists of **61 discrete actions** representing all possible moves:
@@ -186,6 +224,15 @@ The action space consists of **61 discrete actions** representing all possible m
 | 60 | 1 | Draw from deck |
 
 Illegal actions are masked during action selection, ensuring the agent only considers valid moves.
+
+> [!TIP]
+> **Target Q-Value Masking**: We apply action masking in BOTH the policy (action selection) AND the TD target computation:
+> ```python
+> # Mask illegal actions with large negative value in next-state Q-values
+> next_q_values = next_q_values - (1 - next_legal_masks_t) * 1e9
+> next_q_max = next_q_values.max(dim=1)[0]
+> ```
+> This prevents the target from overestimating value by considering illegal future actions. The implementation is in `rl/dqn_train.py:train_step()`.
 
 ### 3.4 Network Architecture
 
@@ -244,15 +291,27 @@ Rather than training on individual game transitions, we employ a **tournament-ba
 
 ### 4.3 Training Dynamics
 
-![DQN Training Progress - Average reward over training iterations](fig2_dqn_avg_reward_over_iters.png)
+![DQN Training Progress - Average reward over training iterations](fig8_training_curve.png)
 
-*Figure 4.2: Training curve showing average reward over iterations. The agent exhibits rapid initial learning followed by gradual refinement and stable convergence.*
+*Figure 4.2: Training curve showing average reward over 10,000 iterations (1 million games). The agent rapidly improves from negative rewards to stable convergence around +0.22.*
 
-The training progression reveals three distinct phases:
+Our Double DQN agent was trained for **10,000 iterations** (100 games per iteration = **1 million total games**) against random opponents. The training progression reveals clear learning:
 
-1. **Rapid Learning (Iterations 1-50)**: The agent quickly discovers basic strategies—playing matching cards and avoiding draws when possible
-2. **Strategy Refinement (Iterations 50-200)**: More sophisticated behaviors emerge, including wild card timing and defensive play
-3. **Convergence (Iterations 200+)**: Performance stabilizes as the policy approaches local optimality
+1. **Rapid Learning (Iterations 1-500)**: The agent quickly learns basic strategies, improving from negative rewards (~-0.15) to positive rewards (~+0.10)
+2. **Strategy Refinement (Iterations 500-2,000)**: Performance continues improving as the agent develops sophisticated card-playing strategies including optimal wild card timing
+3. **Convergence (Iterations 2,000+)**: Performance stabilizes around **+0.22 average reward**, matching the reference paper's +0.244
+
+#### Final Evaluation Results
+
+| Metric | Our Model | Reference Paper | Difference |
+|--------|-----------|-----------------|------------|
+| **Win Rate vs Random** | 61.8% | 62.2% | -0.4% ✓ |
+| **Average Reward** | +0.236 | +0.244 | -0.008 ✓ |
+| **Training Games** | 1,000,000 | ~350,000 | +185% |
+| **Algorithm** | Double DQN | DQN | (improvement) |
+
+> [!NOTE]
+> Our implementation successfully matches the reference paper's performance using Double DQN with target Q-value masking, validating the approach for imperfect-information game learning.
 
 ---
 

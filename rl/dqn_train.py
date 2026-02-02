@@ -32,6 +32,14 @@ from rl.qnet_torch import (
 )
 from rl.random_agent import RandomAgent
 
+# Import heuristic agents for baseline comparison
+try:
+    from opponents.heuristic_agent import HeuristicAgent, DefensiveHeuristic, AggressiveHeuristic
+    HEURISTIC_AVAILABLE = True
+except ImportError:
+    HEURISTIC_AVAILABLE = False
+
+
 
 def run_game(
     env: UnoRLCardEnv,
@@ -39,10 +47,15 @@ def run_game(
     epsilon: float,
     device: torch.device,
     replay_buffer: Optional[ReplayBuffer] = None,
-    training: bool = True
+    training: bool = True,
+    opponent_agent: Optional[object] = None  # New: support different opponent types
 ) -> dict:
     """
     Run a single game and collect experiences.
+    
+    Args:
+        opponent_agent: Optional opponent agent. If None, uses RandomAgent.
+                       Can be: RandomAgent, HeuristicAgent, or QNetwork (self-play)
     
     Returns dict with game statistics.
     """
@@ -52,8 +65,9 @@ def run_game(
     turn_count = 0
     player_experiences = {i: [] for i in range(env.num_players)}
     
-    # Create random agent for opponents
-    random_agent = RandomAgent()
+    # Default to random agent if no opponent specified
+    if opponent_agent is None:
+        opponent_agent = RandomAgent()
     
     while not done:
         turn_count += 1
@@ -62,8 +76,16 @@ def run_game(
             # Our agent (being trained)
             action = q_network.select_action(state, legal_mask, epsilon, device)
         else:
-            # Opponent (random)
-            action = random_agent.select_action(state, legal_mask)
+            # Opponent - supports RandomAgent, HeuristicAgent, or QNetwork (self-play)
+            if isinstance(opponent_agent, QNetwork):
+                # Self-play: use greedy action from opponent network
+                action = opponent_agent.select_greedy_action(state, legal_mask, device)
+            elif hasattr(opponent_agent, 'act'):
+                # Heuristic or LLM opponent
+                action = opponent_agent.act(state, legal_mask)
+            else:
+                # Random agent
+                action = opponent_agent.select_action(state, legal_mask)
         
         # Store experience
         player_experiences[current_player].append({
@@ -105,7 +127,8 @@ def run_game(
         player_experiences[0][-1]['done'] = True
     
     # Add to replay buffer
-    if replay_buffer and training:
+    # FIX: Use 'is not None' because empty ReplayBuffer has __len__=0 which is falsey!
+    if replay_buffer is not None and training:
         for exp in player_experiences[0]:
             replay_buffer.push(
                 exp['state'],
@@ -132,12 +155,17 @@ def train_step(
     replay_buffer: ReplayBuffer,
     batch_size: int,
     gamma: float,
-    device: torch.device
+    device: torch.device,
+    double_dqn: bool = False  # New: Double DQN flag
 ) -> float:
     """
     Perform one training step on a batch from replay buffer.
     
     DQN TD target: y = r + γ * max_a' Q_target(s', a')
+    Double DQN target: y = r + γ * Q_target(s', argmax_a' Q_online(s', a'))
+    
+    The Double DQN variant reduces overestimation bias by decoupling action
+    selection (online network) from value evaluation (target network).
     
     Returns loss value.
     """
@@ -161,10 +189,23 @@ def train_step(
     
     # Target Q values with legal masking
     with torch.no_grad():
-        next_q_values = target_network(next_states_t)
-        # Mask illegal actions with large negative value
-        next_q_values = next_q_values - (1 - next_legal_masks_t) * 1e9
-        next_q_max = next_q_values.max(dim=1)[0]
+        if double_dqn:
+            # Double DQN: action selection with online network, evaluation with target
+            # 1. Get Q-values from online network and mask illegal actions
+            online_next_q = q_network(next_states_t)
+            online_next_q = online_next_q - (1 - next_legal_masks_t) * 1e9
+            # 2. Select best actions using online network
+            best_actions = online_next_q.argmax(dim=1, keepdim=True)
+            # 3. Evaluate those actions using target network
+            target_next_q = target_network(next_states_t)
+            next_q_max = target_next_q.gather(1, best_actions).squeeze(1)
+        else:
+            # Standard DQN: both selection and evaluation with target network
+            next_q_values = target_network(next_states_t)
+            # Mask illegal actions with large negative value
+            next_q_values = next_q_values - (1 - next_legal_masks_t) * 1e9
+            next_q_max = next_q_values.max(dim=1)[0]
+        
         targets = rewards_t + gamma * next_q_max * (1 - dones_t)
     
     # Compute loss and update
@@ -185,10 +226,14 @@ def run_tournament(
     device: torch.device,
     num_games: int,
     replay_buffer: Optional[ReplayBuffer] = None,
-    training: bool = True
+    training: bool = True,
+    opponent_agent: Optional[object] = None  # New: support different opponent types
 ) -> dict:
     """
     Run a tournament of multiple games.
+    
+    Args:
+        opponent_agent: Optional opponent agent (RandomAgent, HeuristicAgent, or QNetwork for self-play)
     
     Returns tournament statistics.
     """
@@ -198,7 +243,7 @@ def run_tournament(
     game_results = []
     
     for _ in range(num_games):
-        result = run_game(env, q_network, epsilon, device, replay_buffer, training)
+        result = run_game(env, q_network, epsilon, device, replay_buffer, training, opponent_agent)
         
         if result['player_0_win']:
             wins += 1
@@ -270,6 +315,16 @@ def main():
     parser.add_argument('--save_freq', type=int, default=100, help='Checkpoint save frequency')
     parser.add_argument('--run_id', type=str, default=None, help='Run ID (auto-generated if not provided)')
     
+    # New arguments addressing professor feedback
+    parser.add_argument('--opponent', type=str, default='random',
+                        choices=['random', 'self', 'heuristic'],
+                        help='Opponent type: random, self-play, or heuristic baseline')
+    parser.add_argument('--double_dqn', action='store_true',
+                        help='Use Double DQN (action selection with online, evaluation with target)')
+    parser.add_argument('--self_play_update', type=int, default=50,
+                        help='Update self-play opponent every N iterations')
+
+    
     args = parser.parse_args()
     
     # Set device
@@ -333,26 +388,56 @@ def main():
     epsilon = args.epsilon_start
     best_win_rate = 0.0
     
-    print(f"\nStarting DQN training: {args.iters} iterations, {args.games_per_iter} games/iter")
+    # Create opponent agent based on --opponent flag
+    opponent_agent = None
+    self_play_network = None
+    
+    if args.opponent == 'self':
+        # Self-play: create frozen copy of Q-network
+        self_play_network = create_target_network(q_network).to(device)
+        opponent_agent = self_play_network
+        print(f"Using SELF-PLAY opponent (updated every {args.self_play_update} iterations)")
+    elif args.opponent == 'heuristic':
+        if HEURISTIC_AVAILABLE:
+            opponent_agent = HeuristicAgent(aggression=0.5)
+            print("Using HEURISTIC opponent")
+        else:
+            print("WARNING: Heuristic agent not available, falling back to random")
+            opponent_agent = RandomAgent()
+    else:
+        opponent_agent = RandomAgent()
+        print("Using RANDOM opponent")
+    
+    algo_name = 'Double DQN' if args.double_dqn else 'DQN'
+    print(f"\nStarting {algo_name} training: {args.iters} iterations, {args.games_per_iter} games/iter")
     print("-" * 60)
     
     for iteration in range(1, args.iters + 1):
-        # Run tournament
+        # Update self-play opponent periodically
+        if args.opponent == 'self' and iteration % args.self_play_update == 0:
+            update_target_network(q_network, self_play_network)
+            print(f"  → Self-play opponent updated at iteration {iteration}")
+        
+        # Run tournament with opponent agent
         tournament = run_tournament(
             env, q_network, epsilon, device,
             num_games=args.games_per_iter,
             replay_buffer=replay_buffer,
-            training=True
+            training=True,
+            opponent_agent=opponent_agent
         )
         
-        # Training steps
+        # Training steps - ensure we do updates once buffer is large enough
         total_loss = 0.0
-        num_updates = min(args.games_per_iter, len(replay_buffer) // args.batch_size)
+        buffer_batches = len(replay_buffer) // args.batch_size
+        # Do at least 1 update per game once buffer is sufficient
+        num_updates = max(1, min(args.games_per_iter, buffer_batches)) if buffer_batches > 0 else 0
         
         for _ in range(num_updates):
             loss = train_step(
                 q_network, target_network, optimizer,
-                replay_buffer, args.batch_size, args.gamma, device
+                replay_buffer, args.batch_size, args.gamma, device,
+                double_dqn=args.double_dqn  # Pass Double DQN flag
             )
             total_loss += loss
         

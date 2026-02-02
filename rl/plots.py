@@ -153,47 +153,64 @@ def plot_training_curve(
     save_dir: Path,
     fig_num: int
 ):
-    """Plot training curve (average reward over iterations)."""
+    """
+    Plot training curve (average reward over iterations).
+    
+    Style matches Stanford DeepSARSA paper (Figure 3):
+    - Single clean line with no raw data overlay
+    - Proper axis labels
+    - Shows progression from negative to positive rewards
+    """
     if not data:
         print(f"  Skipping {algorithm} training curve (no data)")
         return
     
     iterations = [d['iteration'] for d in data]
     rewards = [d['avg_reward'] for d in data]
-    win_rates = [d['win_rate'] for d in data]
     
-    # Smooth the curve with moving average
-    window = min(20, len(rewards) // 5) if len(rewards) > 10 else 1
-    if window > 1:
+    # Apply moving average smoothing for cleaner visualization
+    # Use adaptive window size based on data length
+    window = max(1, min(50, len(rewards) // 20))
+    if window > 1 and len(rewards) > window:
         rewards_smooth = np.convolve(rewards, np.ones(window)/window, mode='valid')
-        iterations_smooth = iterations[window-1:]
+        # Pad the beginning to maintain array length
+        pad_size = len(rewards) - len(rewards_smooth)
+        rewards_smooth = np.concatenate([rewards[:pad_size], rewards_smooth])
     else:
-        rewards_smooth = rewards
-        iterations_smooth = iterations
+        rewards_smooth = np.array(rewards)
     
-    fig, ax = plt.subplots(figsize=(10, 5))
+    # Create figure matching Stanford paper style
+    fig, ax = plt.subplots(figsize=(10, 6))
     
-    # Plot raw data with low alpha
-    ax.plot(iterations, rewards, alpha=0.3, color='#3498db', linewidth=0.5)
-    # Plot smoothed curve
-    ax.plot(iterations_smooth, rewards_smooth, color='#3498db', linewidth=2,
-            label=f'{algorithm} (smoothed)')
+    # Single clean line plot (no raw data overlay to match Stanford style)
+    ax.plot(iterations, rewards_smooth, color='#1f77b4', linewidth=1.5)
     
-    ax.set_xlabel('Training Iteration')
-    ax.set_ylabel('Average Reward per Tournament')
-    ax.set_title(f'{algorithm} Training: Average Reward over Iterations')
-    ax.legend(loc='lower right')
-    ax.set_xlim(left=0)
+    # Axis labels matching Stanford paper
+    ax.set_xlabel('Iterations', fontsize=12)
+    ax.set_ylabel('Average Reward', fontsize=12)
+    ax.set_title(algorithm, fontsize=14, fontweight='bold')
     
-    # Add horizontal line at y=0
-    ax.axhline(y=0, color='#7f8c8d', linestyle='--', alpha=0.5)
+    # Set x-axis limits
+    ax.set_xlim(0, max(iterations))
+    
+    # Add subtle grid for readability
+    ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
+    
+    # Add horizontal line at y=0 for reference
+    ax.axhline(y=0, color='gray', linestyle='-', alpha=0.3, linewidth=0.5)
+    
+    # Adjust tick formatting for large iteration counts
+    if max(iterations) >= 10000:
+        ax.ticklabel_format(style='plain', axis='x')
     
     plt.tight_layout()
     
-    algo_lower = algorithm.lower().replace('deep', '')
+    algo_lower = algorithm.lower().replace('deep', '').replace(' ', '_')
     filename = f'fig{fig_num}_{algo_lower}_avg_reward_over_iters'
-    fig.savefig(save_dir / f'{filename}.png', dpi=150, bbox_inches='tight')
-    fig.savefig(save_dir / f'{filename}.svg', bbox_inches='tight')
+    fig.savefig(save_dir / f'{filename}.png', dpi=150, bbox_inches='tight',
+                facecolor='white', edgecolor='none')
+    fig.savefig(save_dir / f'{filename}.svg', bbox_inches='tight',
+                facecolor='white', edgecolor='none')
     plt.close(fig)
     
     print(f"  Saved: {filename}.png/svg")

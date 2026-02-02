@@ -27,6 +27,157 @@ STATE_SHAPE = (NUM_PLANES, COLOR_COUNT, CARD_TYPE_COUNT)  # 7 × 4 × 15
 STATE_SIZE = NUM_PLANES * COLOR_COUNT * CARD_TYPE_COUNT  # 420
 
 
+# =============================================================================
+# PUBLIC INFORMATION TRACKING FOR OPPONENT MODELING
+# =============================================================================
+# This class implements transparent opponent hand estimation using ONLY
+# publicly observable information, addressing potential information leakage
+# concerns. All estimates are derived from:
+#   1. Cards played (visible to all players)
+#   2. Number of cards drawn (count only, not card identities)
+#   3. Card conservation (total deck composition is known)
+# =============================================================================
+
+class PublicInfoTracker:
+    """
+    Track public information for opponent hand estimation.
+    
+    Uses only publicly observable information:
+    - Cards played by all players (visible)
+    - Number of cards drawn per player (count only)
+    - Card conservation (deck composition is known)
+    
+    No privileged information is used - opponent hand contents are never accessed.
+    """
+    
+    # Standard Uno deck composition (108 cards total for 2-player)
+    DECK_COMPOSITION = {
+        # Number cards: one 0 per color, two of each 1-9 per color
+        # Action cards: two each of Skip, Reverse, Draw Two per color
+        # Wild cards: 4 Wild, 4 Wild Draw Four
+    }
+    TOTAL_CARDS = 108
+    
+    def __init__(self, num_players: int = 2):
+        self.num_players = num_players
+        self.reset()
+    
+    def reset(self):
+        """Reset tracker for new game."""
+        # Cards that have been played (publicly visible)
+        self.played_cards: list[Card] = []
+        # Number of cards each player has drawn (count only, not values)
+        self.draw_counts: dict[int, int] = {i: 0 for i in range(self.num_players)}
+        # Initial hand sizes (typically 7 cards each)
+        self.initial_hand_size = 7
+        # Track cards played by each player
+        self.cards_played_by: dict[int, list[Card]] = {i: [] for i in range(self.num_players)}
+    
+    def record_play(self, player_id: int, card: Card):
+        """Record a card being played (public information)."""
+        self.played_cards.append(card)
+        self.cards_played_by[player_id].append(card)
+    
+    def record_draw(self, player_id: int, count: int = 1):
+        """Record player drawing cards (count only, not values)."""
+        self.draw_counts[player_id] += count
+    
+    def estimate_opponent_hand_size(self, player_id: int) -> int:
+        """Estimate opponent's current hand size from public info."""
+        cards_played = len(self.cards_played_by[player_id])
+        cards_drawn = self.draw_counts[player_id]
+        return self.initial_hand_size - cards_played + cards_drawn
+    
+    def estimate_remaining_cards(self, own_hand: list[Card]) -> np.ndarray:
+        """
+        Estimate remaining cards not in own hand using card conservation.
+        
+        Returns array of shape (4, 15) with estimated counts for each card type.
+        These are the cards that could be in opponents' hands or the deck.
+        """
+        # Start with full deck composition
+        remaining = get_full_deck_counts()
+        
+        # Subtract own hand
+        own_counts = count_cards_by_type(own_hand)
+        remaining -= own_counts
+        
+        # Subtract played cards
+        played_counts = count_cards_by_type(self.played_cards)
+        remaining -= played_counts
+        
+        # Clamp to non-negative
+        remaining = np.maximum(remaining, 0)
+        
+        return remaining
+    
+    def estimate_opponent_distribution(
+        self, 
+        own_hand: list[Card],
+        opponent_hand_sizes: list[int]
+    ) -> np.ndarray:
+        """
+        Estimate opponent card distribution using public information only.
+        
+        Uses maximum entropy assumption: distribute remaining cards uniformly
+        across unknown positions (deck + opponent hands).
+        
+        Args:
+            own_hand: Player's own cards (known exactly)
+            opponent_hand_sizes: Number of cards each opponent has
+            
+        Returns:
+            Array of shape (4, 15) with expected opponent card counts
+        """
+        remaining = self.estimate_remaining_cards(own_hand)
+        total_remaining = remaining.sum()
+        
+        if total_remaining == 0:
+            return np.zeros((COLOR_COUNT, CARD_TYPE_COUNT), dtype=np.float32)
+        
+        # Total opponent cards
+        total_opponent_cards = sum(opponent_hand_sizes)
+        
+        # Distribute proportionally (maximum entropy assumption)
+        # P(opponent has card X) = (remaining X) / total_remaining * opponent_cards
+        opponent_estimate = remaining * (total_opponent_cards / max(total_remaining, 1))
+        
+        return opponent_estimate.astype(np.float32)
+
+
+def get_full_deck_counts() -> np.ndarray:
+    """
+    Get counts of each card type in a full Uno deck.
+    
+    Standard deck:
+    - 1x Zero per color (4 total)
+    - 2x each of 1-9 per color (72 total)
+    - 2x Skip per color (8 total)
+    - 2x Reverse per color (8 total)
+    - 2x Draw Two per color (8 total)
+    - 4x Wild (spread across colors for encoding)
+    - 4x Wild Draw Four (spread across colors for encoding)
+    """
+    counts = np.zeros((COLOR_COUNT, CARD_TYPE_COUNT), dtype=np.float32)
+    
+    for color_idx in range(COLOR_COUNT):
+        # Zeros: 1 per color
+        counts[color_idx, CardType.ZERO.value] = 1
+        # Numbers 1-9: 2 per color
+        for num in [CardType.ONE, CardType.TWO, CardType.THREE, CardType.FOUR,
+                    CardType.FIVE, CardType.SIX, CardType.SEVEN, CardType.EIGHT, CardType.NINE]:
+            counts[color_idx, num.value] = 2
+        # Action cards: 2 per color
+        counts[color_idx, CardType.SKIP.value] = 2
+        counts[color_idx, CardType.REVERSE.value] = 2
+        counts[color_idx, CardType.DRAW_TWO.value] = 2
+        # Wild cards: 4 total, spread as 1 per color for encoding
+        counts[color_idx, CardType.WILD.value] = 1
+        counts[color_idx, CardType.WILD_DRAW_FOUR.value] = 1
+    
+    return counts
+
+
 def count_cards_by_type(cards: list[Card]) -> np.ndarray:
     """
     Count cards by (color, type) combination.
